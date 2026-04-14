@@ -30,7 +30,7 @@ To ensure robustness against environmental noise (Low SNR), the following R&D te
 
 ---
 
-## 📈 Performance Results
+## Performance Results
 The proposed architecture provides a significant leap in efficiency over standard baselines:
 
 | Model | Parameters | Accuracy | F1-Score |
@@ -40,7 +40,7 @@ The proposed architecture provides a significant leap in efficiency over standar
 
 ---
 
-## 🛠 Usage
+## Usage
 ### Requirements
 * Python 3.12+
 * PyTorch 2.1+
