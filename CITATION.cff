@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: "RF Signal Spectrum Classification using Lightweight CNN"
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+authors:
+  - given-names: "Vinh Huy"
+    family-names: "Giang"
+    affiliation: "Ho Chi Minh City University of Technology and Education (HCMUTE)"
+abstract: >
+  A high-performance deep learning system for automatic identification of
+  Radio Frequency (RF) signals from spectrograms. Achieves 91.83% validation
+  accuracy with only 89,196 parameters, optimized for Edge AI and TinyML
+  applications.
+keywords:
+  - deep learning
+  - radar signal classification
+  - RF signal
+  - lightweight CNN
+  - edge AI
+  - TinyML
+  - coordinate attention
+  - spectrogram
+license: MIT
+repository-code: "https://github.com/vinhhuy15/Radar-Signal-Classification-DL"
