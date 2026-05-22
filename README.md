@@ -128,17 +128,3 @@ predicted_class = torch.argmax(output, dim=1)
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
-
-## Citation
-
-If you use this work in your research, please cite:
-
-```bibtex
-@misc{vhhuy2026rfclassification,
-  title     = {RF Signal Spectrum Classification using Lightweight CNN},
-  author    = {Giang Vinh Huy},
-  year      = {2026},
-  publisher = {GitHub},
-  url       = {https://github.com/vinhhuy15/Radar-Signal-Classification-DL}
-}
-```
