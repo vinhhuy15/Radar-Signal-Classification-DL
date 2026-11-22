@@ -51,7 +51,7 @@ def run(cfg: Config, resume: str | None = None) -> dict:
     use_amp = cfg.train.amp and device.type == "cuda"
     log.info(f"Device: {device} | AMP: {use_amp} | output: {out}")
 
-    bundle = build_loaders(cfg.data, cfg.augment, cfg.train.seed, splits=("train", "val"))
+    bundle = build_loaders(cfg.data, cfg.augment, cfg.train.seed, splits=("train", "val"), device_normalize=True)
     classes = bundle.classes
     log.info(
         f"Classes ({len(classes)}): {classes} | train={len(bundle.loaders['train'].dataset)} "
@@ -109,9 +109,10 @@ def run(cfg: Config, resume: str | None = None) -> dict:
             ema=ema,
             mixup_alpha=cfg.augment.mixup_alpha,
             use_amp=use_amp,
+            norm=bundle.device_norm,
         )
         eval_model = ema.ema if ema is not None else model
-        val = evaluate(eval_model, bundle.loaders["val"], eval_criterion, device)
+        val = evaluate(eval_model, bundle.loaders["val"], eval_criterion, device, norm=bundle.device_norm)
         scheduler.step()
 
         row = {

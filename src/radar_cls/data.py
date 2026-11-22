@@ -28,11 +28,12 @@ SPLITS = ("train", "val", "test")
 
 # --------------------------------------------------------------------------- transforms
 def build_transforms(
-    data: DataConfig, augment: AugmentConfig, train: bool, from_cache: bool = False
+    data: DataConfig, augment: AugmentConfig, train: bool, from_cache: bool = False, normalize: bool = True
 ) -> transforms.Compose:
     """Train transform may be random; eval transform is always deterministic.
 
     ``from_cache``: inputs are already-resized uint8 CHW tensors from the memmap cache.
+    ``normalize=False`` (cache only): keep uint8 output; :func:`to_device` scales it on the GPU.
     """
     ops: list = []
     if data.image_size is not None and not from_cache:
@@ -43,6 +44,8 @@ def build_transforms(
         if augment.color_jitter > 0:
             ops.append(transforms.ColorJitter(brightness=augment.color_jitter, contrast=augment.color_jitter))
     if from_cache:
+        if not normalize:
+            return transforms.Compose(ops)
         # Jitter/flip on uint8 tensors match the PIL path; then scale to [0, 1] like ToTensor.
         ops += [transforms.ConvertImageDtype(torch.float32), transforms.Normalize(data.mean, data.std)]
     else:
@@ -200,17 +203,39 @@ def load_or_build_cache(data: DataConfig, rows: list[tuple[str, int]], name: str
 class DataBundle:
     classes: list[str]
     loaders: dict[str, DataLoader]
+    # (mean, std) when the loaders yield uint8 batches that still need scaling; see to_device().
+    device_norm: tuple[tuple[float, ...], tuple[float, ...]] | None = None
 
 
-def build_loaders(data: DataConfig, augment: AugmentConfig, seed: int, splits=SPLITS) -> DataBundle:
+def to_device(images: torch.Tensor, device: torch.device, norm=None) -> torch.Tensor:
+    """Move a batch to ``device``. uint8 batches are scaled to [0, 1] and normalized there.
+
+    Same result as ``ConvertImageDtype(float32)`` + ``Normalize`` on the CPU, but a quarter of the
+    bytes cross the bus and the per-pixel work runs on the GPU instead of the dataloader workers.
+    """
+    images = images.to(device, non_blocking=True)
+    if images.dtype != torch.uint8:
+        return images
+    if norm is None:
+        raise ValueError("uint8 batch without normalization constants")
+    mean = torch.tensor(norm[0], device=device, dtype=torch.float32).view(1, -1, 1, 1)
+    std = torch.tensor(norm[1], device=device, dtype=torch.float32).view(1, -1, 1, 1)
+    return (images.float().div_(255.0) - mean).div_(std)
+
+
+def build_loaders(
+    data: DataConfig, augment: AugmentConfig, seed: int, splits=SPLITS, device_normalize: bool = False
+) -> DataBundle:
+    """``device_normalize`` (only with ``data.cache_dir``): yield uint8 batches; scale with to_device()."""
     classes, rows = prepare_splits(data)
+    device_normalize = device_normalize and bool(data.cache_dir)
     pin = torch.cuda.is_available()
     loaders = {}
     for s in splits:
         is_train = s == "train"
         if data.cache_dir:
             images = load_or_build_cache(data, rows[s], s)
-            tf = build_transforms(data, augment, train=is_train, from_cache=True)
+            tf = build_transforms(data, augment, train=is_train, from_cache=True, normalize=not device_normalize)
             ds = CachedDataset(images, [y for _, y in rows[s]], tf)
         else:
             ds = SplitDataset(data.root, rows[s], build_transforms(data, augment, train=is_train))
@@ -226,4 +251,5 @@ def build_loaders(data: DataConfig, augment: AugmentConfig, seed: int, splits=SP
             generator=gen,
             persistent_workers=data.num_workers > 0,
         )
-    return DataBundle(classes=classes, loaders=loaders)
+    norm = (tuple(data.mean), tuple(data.std)) if device_normalize else None
+    return DataBundle(classes=classes, loaders=loaders, device_norm=norm)

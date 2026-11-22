@@ -11,6 +11,8 @@ import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader
 
+from .data import to_device
+
 
 class ModelEMA:
     """Exponential moving average of model weights. BatchNorm buffers are tracked too."""
@@ -73,12 +75,13 @@ def train_one_epoch(
     ema: ModelEMA | None = None,
     mixup_alpha: float = 0.0,
     use_amp: bool = False,
+    norm=None,
 ) -> EpochStats:
     """One pass over ``loader``. Accuracy under MixUp is the lam-weighted match to both targets."""
     model.train()
     loss_sum, correct, total = 0.0, 0.0, 0
     for images, labels in loader:
-        images = images.to(device, non_blocking=True)
+        images = to_device(images, device, norm)
         labels = labels.to(device, non_blocking=True)
         inputs, y_a, y_b, lam = mixup_batch(images, labels, mixup_alpha)
 
@@ -101,12 +104,12 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def predict(model: nn.Module, loader: DataLoader, device: torch.device):
+def predict(model: nn.Module, loader: DataLoader, device: torch.device, norm=None):
     """Return (labels, predictions, probabilities) as numpy arrays."""
     model.eval()
     ys, preds, probs = [], [], []
     for images, labels in loader:
-        logits = model(images.to(device, non_blocking=True)).float()
+        logits = model(to_device(images, device, norm)).float()
         p = logits.softmax(1)
         ys.append(labels.numpy())
         preds.append(p.argmax(1).cpu().numpy())
@@ -115,12 +118,14 @@ def predict(model: nn.Module, loader: DataLoader, device: torch.device):
 
 
 @torch.no_grad()
-def evaluate(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> dict[str, float]:
+def evaluate(
+    model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device, norm=None
+) -> dict[str, float]:
     model.eval()
     loss_sum, total = 0.0, 0
     ys, preds = [], []
     for images, labels in loader:
-        images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+        images, labels = to_device(images, device, norm), labels.to(device, non_blocking=True)
         logits = model(images).float()
         loss_sum += criterion(logits, labels).item() * labels.size(0)
         total += labels.size(0)
