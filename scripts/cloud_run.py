@@ -4,7 +4,7 @@
 
 What it does:
 1. Finds (Kaggle) or downloads (Colab, via the Kaggle API) the dataset.
-2. Reads WANDB_API_KEY (and on Colab KAGGLE_USERNAME / KAGGLE_KEY) from the platform's secrets.
+2. Reads WANDB_API_KEY (and on Colab KAGGLE_API_TOKEN, or KAGGLE_USERNAME / KAGGLE_KEY) from the platform's secrets.
 3. Builds the split files and the uint8 image cache once.
 4. Runs the suite on every visible GPU in parallel (one process per GPU, disjoint shards).
 5. Runs CPU benchmarks (latency, INT8) alone afterwards and writes results/<suite>.md.
@@ -64,12 +64,20 @@ def find_dataset_root(base: Path) -> Path:
 def colab_download(work: Path) -> Path:
     target = Path("/content/data")
     if not target.exists() or not any(target.iterdir()):
-        for name in ("KAGGLE_USERNAME", "KAGGLE_KEY"):
-            value = get_secret("colab", name)
-            if not value:
-                raise RuntimeError(f"Add {name} to Colab Secrets (key icon on the left) to download the dataset.")
-            os.environ[name] = value
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "kaggle"], check=True)
+        # Either a new-style API token (kaggle.com > Settings > API Tokens) or the legacy kaggle.json pair.
+        token = get_secret("colab", "KAGGLE_API_TOKEN")
+        if token:
+            os.environ["KAGGLE_API_TOKEN"] = token
+        else:
+            for name in ("KAGGLE_USERNAME", "KAGGLE_KEY"):
+                value = get_secret("colab", name)
+                if not value:
+                    raise RuntimeError(
+                        f"Add KAGGLE_API_TOKEN (or {name}) to Colab Secrets (key icon on the left) "
+                        "to download the dataset."
+                    )
+                os.environ[name] = value
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "kaggle"], check=True)
         target.mkdir(parents=True, exist_ok=True)
         print(f"[cloud_run] downloading {DATASET} to {target} ...", flush=True)
         subprocess.run(["kaggle", "datasets", "download", "-d", DATASET, "-p", str(target), "--unzip"], check=True)
