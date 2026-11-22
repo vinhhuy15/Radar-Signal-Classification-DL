@@ -28,9 +28,12 @@ EXPECTED = {"LFM", "BPSK", "QPSK", "BARKER"}
 
 
 def detect_platform() -> str:
-    if Path("/kaggle/input").exists():
+    # Check Colab first: recent Colab runtimes also have a /kaggle/input folder.
+    if "COLAB_RELEASE_TAG" in os.environ or "COLAB_GPU" in os.environ:
+        return "colab"
+    if "KAGGLE_KERNEL_RUN_TYPE" in os.environ or Path("/kaggle/input").exists():
         return "kaggle"
-    if "COLAB_RELEASE_TAG" in os.environ or Path("/content").exists():
+    if Path("/content").exists():
         return "colab"
     return "local"
 
