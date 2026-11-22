@@ -1,0 +1,7 @@
+# Same as default.yaml, with Kaggle paths. Usage:
+#   python -m radar_cls.train --config configs/kaggle.yaml
+output_dir: /kaggle/working/runs/default
+
+data:
+  root: /kaggle/input/datasets/huynhthethien/radarcommunsignaldata2026train
+  split_dir: splits      # commit the generated CSVs so every run uses the same split
