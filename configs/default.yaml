@@ -1,0 +1,41 @@
+# Full model (RF-SpectroNet) with the clean evaluation protocol.
+# Any value can be overridden from the command line, e.g.
+#   python -m radar_cls.train --config configs/default.yaml --set train.seed=1 output_dir=runs/seed1
+output_dir: runs/default
+
+data:
+  root: data/radarcommunsignaldata2026train   # ImageFolder layout: <root>/<class>/<image>
+  split_dir: splits                           # train.csv / val.csv / test.csv, created on first run
+  val_fraction: 0.15
+  test_fraction: 0.15
+  split_seed: 42
+  image_size: null                            # null = keep native resolution (224x224 in this dataset)
+  mean: [0.5, 0.5, 0.5]
+  std: [0.5, 0.5, 0.5]
+  batch_size: 32
+  num_workers: 2
+
+augment:
+  hflip: false          # flipping reverses the time axis of a spectrogram; ablation only
+  color_jitter: 0.2
+  mixup_alpha: 0.2
+
+model:
+  name: rf_spectronet
+  dropout: 0.3
+  max_params: 100000
+
+train:
+  epochs: 80
+  lr: 0.002
+  weight_decay: 0.01
+  min_lr: 1.0e-6
+  label_smoothing: 0.1
+  ema_decay: 0.999
+  amp: true
+  select_metric: macro_f1   # chosen on val only
+  seed: 42
+  deterministic: false
+  device: auto
+  tensorboard: true
+  save_every: 1

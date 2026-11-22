@@ -7,10 +7,9 @@ authors:
     family-names: "Giang"
     affiliation: "Ho Chi Minh City University of Technology and Education (HCMUTE)"
 abstract: >
-  A high-performance deep learning system for automatic identification of
-  Radio Frequency (RF) signals from spectrograms. Achieves 91.83% validation
-  accuracy with only 89,196 parameters, optimized for Edge AI and TinyML
-  applications.
+  A lightweight CNN (86,196 parameters) for automatic identification of
+  radar and communication signals from spectrogram images, aimed at edge
+  devices.
 keywords:
   - deep learning
   - radar signal classification

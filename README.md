@@ -1,130 +1,165 @@
-# RF Signal Spectrum Classification using Lightweight CNN
+# RF Signal Spectrum Classification using a Lightweight CNN
 
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch 2.1+](https://img.shields.io/badge/PyTorch-2.1%2B-ee4c2c.svg)](https://pytorch.org/)
+[![CI](https://github.com/vinhhuy15/Radar-Signal-Classification-DL/actions/workflows/ci.yml/badge.svg)](https://github.com/vinhhuy15/Radar-Signal-Classification-DL/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch 2.5+](https://img.shields.io/badge/PyTorch-2.5%2B-ee4c2c.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Accuracy](https://img.shields.io/badge/Accuracy-91.83%25-brightgreen.svg)](#performance-results)
 
-A high-performance deep learning system for automatic identification of **Radio Frequency (RF)** signals from spectrograms. This project achieves state-of-the-art accuracy within a strict hardware budget of **fewer than 100,000 parameters**, optimized for **Edge AI** and **TinyML** applications.
+Automatic recognition of **radio frequency (RF) signals** from spectrogram images with a CNN of
+**fewer than 100,000 parameters**, aimed at edge devices.
 
----
-
-## Key Highlights
-
-- **Optimized Architecture:** Custom **BasicCNN** (RF-SpectroNet) using **Mobile Inverted Bottleneck (MBConv)** blocks with integrated **Coordinate Attention (CoordAtt)** for spatial-temporal feature capture.
-- **High Efficiency:** Achieved **91.83% validation accuracy** with only **89,196 parameters**.
-- **Robust Training:** MixUp augmentation, Label Smoothing, Exponential Moving Average (EMA), and Cosine Annealing schedule.
-- **Deployment Ready:** Models exported via **TorchScript** for seamless integration into C++ or embedded real-time monitoring systems.
+The model, **RF-SpectroNet** (called `BasicCNN` in the report), stacks Mobile Inverted
+Bottleneck (MBConv) blocks with **Coordinate Attention** and uses hybrid average + max pooling.
+It has **86,196 parameters** for 12 classes.
 
 ---
 
-## Dataset & Classification
+## Classes
 
-The model classifies **76,800 spectrogram images** (resized to 224x224) into 12 specialized classes:
+12 classes, spectrogram images at 224×224:
 
-| Category | Signal Classes |
+| Category | Signal classes |
 |:---|:---|
-| **Telecommunications** | 16-QAM, B-FM, BPSK, CPFSK, DSB-AM, GFSK, PAM4, QPSK |
-| **Radar** | Barker, LFM, Rect, Step-FM |
+| Communications | 16-QAM, B-FM, BPSK, CPFSK, DSB-AM, GFSK, PAM4, QPSK |
+| Radar | Barker, LFM, Rect, Step-FM |
 
----
+## Results
 
-## Project Structure
+> **Status:** being re-measured under the evaluation protocol below. Numbers will be filled in
+> from `metrics.json` of the test split, reported as mean ± std over several seeds.
 
-```
-project_cuoiki/
-├── src/
-│   └── Main.py            # Training & evaluation script
-├── model/
-│   └── TrainedModel.pt     # TorchScript exported model
-├── docs/
-│   └── Report.pdf          # Full technical report
-├── requirements.txt        # Python dependencies
-├── LICENSE                 # MIT License
-└── README.md
-```
+| Model | Parameters | Test accuracy | Test macro-F1 |
+|:---|:---:|:---:|:---:|
+| RF-SpectroNet | 86,196 | _pending_ | _pending_ |
 
----
+**Legacy result (not comparable).** The course version (`legacy/Main.py`) reported 91.83%
+accuracy on a validation split that was also used to pick the best epoch, with random flip and
+colour jitter applied to validation images, and with no separate test set. That number is kept
+for history only.
+
+## Evaluation protocol
+
+- **Stratified train / val / test split (70 / 15 / 15)** with a fixed seed. The file lists are
+  written to `splits/*.csv` on the first run; commit them so every experiment uses the same split.
+- **Model selection on val only** (best epoch by macro-F1). The test split is evaluated once, at the end.
+- **Deterministic eval transforms**: no augmentation on val/test.
+- **No horizontal flip by default**: flipping a spectrogram reverses its time axis (for example it
+  turns an up-chirp into a down-chirp). It can be enabled with `augment.hflip=true` as an ablation.
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.12+
-- CUDA-capable GPU (recommended)
-
-### Setup
-
 ```bash
-# Clone the repository
 git clone https://github.com/vinhhuy15/Radar-Signal-Classification-DL.git
 cd Radar-Signal-Classification-DL
-
-# Install dependencies
-pip install -r requirements.txt
+pip install -e .            # or: pip install -e ".[dev,onnx,tensorboard]"
 ```
 
----
+## Data
+
+Put the dataset in ImageFolder layout (one folder per class) and point `data.root` at it:
+
+```
+data/radarcommunsignaldata2026train/
+├── 16QAM/  *.png
+├── B-FM/   *.png
+└── ...
+```
+
+On Kaggle, use `configs/kaggle.yaml`, which already points at the Kaggle input path.
 
 ## Usage
 
-### Training
-
 ```bash
-python src/Main.py
+# Train (writes runs/default/{best.pt,last.pt,config.yaml,history.json,train.log,tb/})
+python -m radar_cls.train --config configs/default.yaml
+
+# Override any value without editing the file
+python -m radar_cls.train --config configs/default.yaml --set train.seed=1 output_dir=runs/seed1
+
+# Resume an interrupted run
+python -m radar_cls.train --config configs/default.yaml --resume runs/default/last.pt
+
+# Evaluate on the held-out test split (metrics.json, confusion_matrix.png)
+python -m radar_cls.evaluate --checkpoint runs/default/best.pt --split test
+
+# Export to TorchScript (+ ONNX) with class names and preprocessing embedded
+python -m radar_cls.export --checkpoint runs/default/best.pt --image-size 224 --onnx
+
+# Classify images or a folder with the exported model
+python -m radar_cls.predict --model runs/default/export/model.torchscript.pt path/to/images --top-k 3
 ```
 
-> **Note:** The training script expects the dataset at a Kaggle-style path. Modify the `data_dir` variable in `src/Main.py` to point to your local dataset directory.
+After `pip install -e .` the same commands are available as `radar-train`, `radar-evaluate`,
+`radar-export` and `radar-predict`.
 
-### Inference
+### Using the exported model in Python
 
 ```python
 import torch
+from PIL import Image
+from radar_cls.export import load_torchscript
+from radar_cls.predict import preprocess_from_metadata
 
-# Load the TorchScript model
-model = torch.jit.load("model/TrainedModel.pt")
-model.eval()
-
-# Run inference on a spectrogram image
-input_tensor = torch.randn(1, 3, 224, 224)
-output = model(input_tensor)
-predicted_class = torch.argmax(output, dim=1)
+model, meta = load_torchscript("runs/default/export/model.torchscript.pt")  # loads on CPU
+x = preprocess_from_metadata(meta)(Image.open("sample.png").convert("RGB")).unsqueeze(0)
+with torch.no_grad():
+    probs = model(x).softmax(1)[0]
+print(meta["class_names"][probs.argmax().item()], probs.max().item())
 ```
 
----
+Preprocessing is `ToTensor()` followed by `Normalize(mean=0.5, std=0.5)` per channel. It is stored
+in the model's metadata, so you do not need to hard-code it.
 
-## Technical Details
+## Project structure
 
-| Component | Choice |
+```
+├── configs/
+│   ├── default.yaml          # full model, clean protocol
+│   └── kaggle.yaml           # Kaggle paths
+├── src/radar_cls/
+│   ├── config.py             # typed config, YAML loading, --set overrides
+│   ├── data.py               # stratified splits, transforms, loaders
+│   ├── models/               # model registry + RF-SpectroNet
+│   ├── engine.py             # train/eval loops, EMA, MixUp
+│   ├── train.py              # training CLI (checkpoints, resume, AMP, TensorBoard)
+│   ├── evaluate.py           # metrics, per-class report, confusion matrix
+│   ├── export.py             # TorchScript / ONNX export with metadata
+│   └── predict.py            # inference CLI
+├── tests/                    # pytest: model, data protocol, end-to-end smoke test
+├── legacy/Main.py            # original course script, kept unchanged for reference
+└── docs/Report.pdf           # course technical report
+```
+
+## Training recipe
+
+| Component | Setting |
 |:---|:---|
-| **Architecture** | BasicCNN with MBConv + Coordinate Attention |
-| **Pooling** | Hybrid (Global Average + Max Pooling concatenation) |
-| **Regularization** | MixUp (alpha=0.2), Label Smoothing (0.1), Dropout (0.3) |
-| **Optimizer** | AdamW (lr=2e-3, weight_decay=1e-2) |
-| **Scheduler** | Cosine Annealing (T_max=80, eta_min=1e-6) |
-| **Weight Averaging** | EMA (decay=0.999) |
+| Architecture | MBConv (expand 2) + Coordinate Attention, 5 blocks |
+| Pooling | Global average + global max, concatenated |
+| Regularization | MixUp (α = 0.2), label smoothing (0.1), dropout (0.3) |
+| Optimizer | AdamW (lr = 2e-3, weight decay = 1e-2) |
+| Schedule | Cosine annealing to 1e-6 over 80 epochs |
+| Weight averaging | EMA (decay = 0.999), used for validation and the saved model |
 
----
+## Development
 
-## Performance Results
+```bash
+pip install -e ".[dev]"
+pytest            # CPU-only, about a minute, uses a tiny synthetic dataset
+ruff check . && ruff format --check .
+```
 
-| Model | Parameters | Accuracy | F1-Score |
-|:---|:---|:---|:---|
-| Baseline | 88,524 | 88.30% | 89.48% |
-| **BasicCNN (Ours)** | **89,196** | **91.83%** | **90.35%** |
+CI runs the same checks on every pull request.
 
----
+## Limitations
 
-## Authors
+- The dataset has no SNR labels, so robustness versus SNR is not measured yet.
+- No measurements on embedded hardware; any latency figures will be from a desktop CPU.
 
-**Ho Chi Minh City University of Technology and Education (HCMUTE)**
+## Author
 
-- Giang Vinh Huy
-
----
+Giang Vinh Huy, Ho Chi Minh City University of Technology and Education (HCMUTE).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
+MIT, see [LICENSE](LICENSE).
