@@ -159,7 +159,7 @@ alone and writes `results/<suite>.md`. Re-running continues where it stopped.
 ```
 
 **Colab** (secrets `WANDB_API_KEY`, `KAGGLE_USERNAME`, `KAGGLE_KEY`; mounting Drive keeps runs
-across runtime resets):
+across runtime resets). Ready-made notebook: `notebooks/colab_run.ipynb`.
 
 ```python
 from google.colab import drive; drive.mount("/content/drive")
