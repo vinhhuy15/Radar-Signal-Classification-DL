@@ -255,7 +255,9 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("suite")
     r.add_argument("--seeds", type=int, nargs="*")
     r.add_argument("--only", nargs="*", help="run only these variants")
-    r.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="extra overrides for every run")
+    r.add_argument(
+        "--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE", help="extra overrides for every run"
+    )
     r.add_argument("--wandb", choices=["on", "off"], default=None)
     r.add_argument("--shard", default="0/1", help="i/n: run only every n-th pair starting at i")
     r.add_argument("--defer-cpu-benchmarks", action="store_true", help="skip latency/INT8; run finalize later")
@@ -263,7 +265,7 @@ def main(argv: list[str] | None = None) -> None:
     fz.add_argument("suite")
     pr = sub.add_parser("prepare", help="build split files and image cache")
     pr.add_argument("suite")
-    pr.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE")
+    pr.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE")
     a = sub.add_parser("aggregate")
     a.add_argument("suite")
     a.add_argument("--results-dir", default="results")

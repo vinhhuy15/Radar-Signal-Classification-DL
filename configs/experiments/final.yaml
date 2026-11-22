@@ -1,0 +1,9 @@
+# Headline numbers for the report: the full model with the course recipe (80 epochs), 5 seeds,
+# plus INT8 for every seed.
+name: final
+base: configs/default.yaml
+seeds: [0, 1, 2, 3, 4]
+common: []
+variants:
+  rf_spectronet: []
+compress: [rf_spectronet]
