@@ -73,8 +73,8 @@ def colab_download(work: Path) -> Path:
         found = {n: get_secret("colab", n) for n in names}
         print(f"[cloud_run] Kaggle secrets found: {[n for n, v in found.items() if v] or 'none'}", flush=True)
         token = found["KAGGLE_API_TOKEN"] or found["KAGGLE_TOKEN"]
-        if not token and found["KAGGLE_KEY"] and found["KAGGLE_KEY"].startswith("KGAT_"):
-            token = found["KAGGLE_KEY"]
+        if not token:  # a new-style token saved under another name
+            token = next((v for v in found.values() if v and v.strip().startswith("KGAT_")), None)
         if token:
             os.environ["KAGGLE_API_TOKEN"] = token.strip()
         elif found["KAGGLE_USERNAME"] and found["KAGGLE_KEY"]:
