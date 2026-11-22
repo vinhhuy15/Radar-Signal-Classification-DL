@@ -58,3 +58,46 @@ def test_no_flip_by_default():
     assert not any(isinstance(t, transforms.RandomHorizontalFlip) for t in tf.transforms)
     tf = build_transforms(DataConfig(), AugmentConfig(hflip=True), train=True)
     assert any(isinstance(t, transforms.RandomHorizontalFlip) for t in tf.transforms)
+
+
+def test_cached_dataset_matches_png_pipeline(cfg, tmp_path):
+    from radar_cls.data import build_loaders
+
+    plain = build_loaders(cfg.data, cfg.augment, seed=0, splits=("val",)).loaders["val"].dataset
+    cfg.data.cache_dir = str(tmp_path / "cache")
+    cached = build_loaders(cfg.data, cfg.augment, seed=0, splits=("val",)).loaders["val"].dataset
+    assert len(plain) == len(cached)
+    for i in range(len(plain)):
+        a, ya = plain[i]
+        b, yb = cached[i]
+        assert ya == yb
+        torch.testing.assert_close(a, b)
+    # Second build reuses the cache file.
+    files = list((tmp_path / "cache").glob("*.u8"))
+    build_loaders(cfg.data, cfg.augment, seed=0, splits=("val",))
+    assert list((tmp_path / "cache").glob("*.u8")) == files
+
+
+def test_cached_train_transform_runs(cfg, tmp_path):
+    from radar_cls.data import build_loaders
+
+    cfg.data.cache_dir = str(tmp_path / "cache")
+    cfg.augment.hflip = True
+    x, y = next(iter(build_loaders(cfg.data, cfg.augment, seed=0, splits=("train",)).loaders["train"]))
+    assert x.dtype == torch.float32 and x.shape[1] == 3 and -1.01 <= x.min() and x.max() <= 1.01
+
+
+def test_device_normalized_batches_match_cpu_normalization(cfg, tmp_path):
+    from radar_cls.data import build_loaders, to_device
+
+    cfg.data.cache_dir = str(tmp_path / "cache")
+    cpu = build_loaders(cfg.data, cfg.augment, seed=0, splits=("val",))
+    dev = build_loaders(cfg.data, cfg.augment, seed=0, splits=("val",), device_normalize=True)
+    assert cpu.device_norm is None and dev.device_norm is not None
+    (a, ya), (b, yb) = next(iter(cpu.loaders["val"])), next(iter(dev.loaders["val"]))
+    assert b.dtype == torch.uint8 and torch.equal(ya, yb)
+    torch.testing.assert_close(to_device(b, torch.device("cpu"), dev.device_norm), a)
+    # Float batches pass through unchanged; without a cache the flag is ignored.
+    assert to_device(a, torch.device("cpu")) is a
+    cfg.data.cache_dir = None
+    assert build_loaders(cfg.data, cfg.augment, seed=0, splits=("val",), device_normalize=True).device_norm is None

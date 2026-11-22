@@ -11,25 +11,44 @@ import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader
 
+from .data import to_device
+
 
 class ModelEMA:
     """Exponential moving average of model weights. BatchNorm buffers are tracked too."""
 
-    def __init__(self, model: nn.Module, decay: float = 0.999):
+    def __init__(self, model: nn.Module, decay: float = 0.999, warmup: bool = False):
         self.ema = copy.deepcopy(model).eval()
         self.decay = decay
+        self.warmup = warmup
+        self.updates = 0
+        self._pairs = None  # cached (ema, model) tensor lists; state_dict tensors share storage
         for p in self.ema.parameters():
             p.requires_grad_(False)
 
+    def current_decay(self) -> float:
+        if not self.warmup:
+            return self.decay
+        return min(self.decay, (1 + self.updates) / (10 + self.updates))
+
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
-        model_state = model.state_dict()
-        for name, ema_v in self.ema.state_dict().items():
-            model_v = model_state[name].detach()
-            if ema_v.dtype.is_floating_point:
-                ema_v.mul_(self.decay).add_(model_v, alpha=1.0 - self.decay)
-            else:
-                ema_v.copy_(model_v)
+        d = self.current_decay()
+        self.updates += 1
+        if self._pairs is None:
+            ema_state, model_state = self.ema.state_dict(), model.state_dict()
+            float_pairs = [(ema_state[k], v) for k, v in model_state.items() if v.dtype.is_floating_point]
+            self._pairs = (
+                [e for e, _ in float_pairs],
+                [m for _, m in float_pairs],
+                [(ema_state[k], v) for k, v in model_state.items() if not v.dtype.is_floating_point],
+            )
+        ema_f, model_f, others = self._pairs
+        # One fused kernel per op instead of one per tensor.
+        torch._foreach_mul_(ema_f, d)
+        torch._foreach_add_(ema_f, model_f, alpha=1.0 - d)
+        for e, m in others:
+            e.copy_(m)
 
 
 def mixup_batch(x: torch.Tensor, y: torch.Tensor, alpha: float):
@@ -56,12 +75,13 @@ def train_one_epoch(
     ema: ModelEMA | None = None,
     mixup_alpha: float = 0.0,
     use_amp: bool = False,
+    norm=None,
 ) -> EpochStats:
     """One pass over ``loader``. Accuracy under MixUp is the lam-weighted match to both targets."""
     model.train()
     loss_sum, correct, total = 0.0, 0.0, 0
     for images, labels in loader:
-        images = images.to(device, non_blocking=True)
+        images = to_device(images, device, norm)
         labels = labels.to(device, non_blocking=True)
         inputs, y_a, y_b, lam = mixup_batch(images, labels, mixup_alpha)
 
@@ -84,12 +104,12 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def predict(model: nn.Module, loader: DataLoader, device: torch.device):
+def predict(model: nn.Module, loader: DataLoader, device: torch.device, norm=None):
     """Return (labels, predictions, probabilities) as numpy arrays."""
     model.eval()
     ys, preds, probs = [], [], []
     for images, labels in loader:
-        logits = model(images.to(device, non_blocking=True)).float()
+        logits = model(to_device(images, device, norm)).float()
         p = logits.softmax(1)
         ys.append(labels.numpy())
         preds.append(p.argmax(1).cpu().numpy())
@@ -98,12 +118,14 @@ def predict(model: nn.Module, loader: DataLoader, device: torch.device):
 
 
 @torch.no_grad()
-def evaluate(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> dict[str, float]:
+def evaluate(
+    model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device, norm=None
+) -> dict[str, float]:
     model.eval()
     loss_sum, total = 0.0, 0
     ys, preds = [], []
     for images, labels in loader:
-        images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+        images, labels = to_device(images, device, norm), labels.to(device, non_blocking=True)
         logits = model(images).float()
         loss_sum += criterion(logits, labels).item() * labels.size(0)
         total += labels.size(0)

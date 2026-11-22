@@ -24,13 +24,16 @@ dependencies = [
 [project.optional-dependencies]
 onnx = ["onnx>=1.16", "onnxruntime>=1.18"]
 tensorboard = ["tensorboard>=2.15"]
-dev = ["pytest>=8", "ruff>=0.6", "onnx>=1.16"]
+wandb = ["wandb>=0.17"]
+dev = ["pytest>=8", "ruff>=0.6", "onnx>=1.16", "onnxruntime>=1.18", "wandb>=0.17"]
 
 [project.scripts]
 radar-train = "radar_cls.train:main"
 radar-evaluate = "radar_cls.evaluate:main"
 radar-export = "radar_cls.export:main"
 radar-predict = "radar_cls.predict:main"
+radar-compress = "radar_cls.compress:main"
+radar-experiments = "radar_cls.experiments:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -42,7 +45,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-extend-exclude = ["legacy"]
+extend-exclude = ["legacy", "notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]

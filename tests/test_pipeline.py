@@ -81,3 +81,13 @@ def test_default_config_file_loads():
     cfg = load_config(Path(__file__).parents[1] / "configs" / "default.yaml")
     assert cfg.augment.hflip is False
     assert cfg.data.val_fraction + cfg.data.test_fraction < 1
+
+
+def test_train_with_cache_and_device_normalization(cfg, tmp_path):
+    # Same pipeline with the uint8 cache: batches are normalized in to_device(), not in workers.
+    cfg.data.cache_dir = str(tmp_path / "cache")
+    cfg.output_dir = str(tmp_path / "cached_run")
+    summary = train.run(cfg)
+    assert summary["best_epoch"] >= 1
+    history = json.loads((Path(cfg.output_dir) / "history.json").read_text())
+    assert all(0.0 <= row["val_accuracy"] <= 1.0 for row in history)

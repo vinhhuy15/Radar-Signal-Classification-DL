@@ -34,10 +34,52 @@ class CoordAtt(nn.Module):
         return x * a_w * a_h
 
 
+class SqueezeExcite(nn.Module):
+    """Squeeze-and-Excitation, used as an alternative to Coordinate Attention in ablations."""
+
+    def __init__(self, inp: int, reduction: int = 8):
+        super().__init__()
+        mip = max(8, inp // reduction)
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1), nn.Conv2d(inp, mip, 1), nn.SiLU(inplace=True), nn.Conv2d(mip, inp, 1), nn.Sigmoid()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * self.fc(x)
+
+
+def make_attention(kind: str, channels: int) -> nn.Module:
+    if kind == "coord":
+        return CoordAtt(channels)
+    if kind == "se":
+        return SqueezeExcite(channels)
+    if kind == "none":
+        return nn.Identity()
+    raise ValueError(f"Unknown attention {kind!r}; use 'coord', 'se' or 'none'")
+
+
+class HybridPool(nn.Module):
+    """Global pooling head input: 'hybrid' concatenates average and max pooling, 'avg' uses average only."""
+
+    def __init__(self, mode: str = "hybrid"):
+        super().__init__()
+        if mode not in ("hybrid", "avg", "max"):
+            raise ValueError(f"Unknown pooling {mode!r}; use 'hybrid', 'avg' or 'max'")
+        self.mode = mode
+        self.factor = 2 if mode == "hybrid" else 1
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.mode == "avg":
+            return x.mean(dim=(2, 3))
+        if self.mode == "max":
+            return x.amax(dim=(2, 3))
+        return torch.cat([x.mean(dim=(2, 3)), x.amax(dim=(2, 3))], dim=1)
+
+
 class MBConvCA(nn.Module):
     """Mobile inverted bottleneck with Coordinate Attention on the expanded features."""
 
-    def __init__(self, inp: int, oup: int, stride: int, expand_ratio: float):
+    def __init__(self, inp: int, oup: int, stride: int, expand_ratio: float, attention: str = "coord"):
         super().__init__()
         self.use_res_connect = stride == 1 and inp == oup
         hidden_dim = int(round(inp * expand_ratio))
@@ -50,7 +92,7 @@ class MBConvCA(nn.Module):
             nn.SiLU(inplace=True),
         ]
         self.conv = nn.Sequential(*layers)
-        self.ca = CoordAtt(hidden_dim)
+        self.ca = make_attention(attention, hidden_dim)
         self.project = nn.Sequential(nn.Conv2d(hidden_dim, oup, 1, bias=False), nn.BatchNorm2d(oup))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -59,7 +101,9 @@ class MBConvCA(nn.Module):
 
 
 class RFSpectroNet(nn.Module):
-    def __init__(self, num_classes: int, dropout: float = 0.3):
+    """Defaults reproduce the course model. ``attention`` and ``pooling`` exist for ablations."""
+
+    def __init__(self, num_classes: int, dropout: float = 0.3, attention: str = "coord", pooling: str = "hybrid"):
         super().__init__()
         self.stem = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1, bias=False),
@@ -67,20 +111,18 @@ class RFSpectroNet(nn.Module):
             nn.SiLU(inplace=True),
         )
         self.blocks = nn.Sequential(
-            MBConvCA(16, 24, stride=2, expand_ratio=2),
-            MBConvCA(24, 40, stride=2, expand_ratio=2),
-            MBConvCA(40, 64, stride=2, expand_ratio=2),
-            MBConvCA(64, 80, stride=2, expand_ratio=2),
-            MBConvCA(80, 128, stride=1, expand_ratio=2),
+            MBConvCA(16, 24, stride=2, expand_ratio=2, attention=attention),
+            MBConvCA(24, 40, stride=2, expand_ratio=2, attention=attention),
+            MBConvCA(40, 64, stride=2, expand_ratio=2, attention=attention),
+            MBConvCA(64, 80, stride=2, expand_ratio=2, attention=attention),
+            MBConvCA(80, 128, stride=1, expand_ratio=2, attention=attention),
         )
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.pool = HybridPool(pooling)
         self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(128 * 2, num_classes)  # avg + max pooled features
+        self.fc = nn.Linear(128 * self.pool.factor, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.blocks(self.stem(x))
-        x = torch.cat([self.avg_pool(x), self.max_pool(x)], dim=1).flatten(1)
+        x = self.pool(self.blocks(self.stem(x)))
         return self.fc(self.dropout(x))
 
 
