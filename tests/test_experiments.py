@@ -135,3 +135,22 @@ def test_wandb_offline_logging(cfg, tmp_path, monkeypatch):
 def test_disabled_tracking_has_no_side_effects(cfg):
     cfg2 = config_from_dict(cfg.to_dict())
     assert cfg2.wandb.enabled is False
+
+
+def test_sharded_suite_then_finalize(cfg, image_folder, tmp_path, monkeypatch):
+    pytest.importorskip("onnxruntime")
+    monkeypatch.chdir(tmp_path)
+    suite = experiments.load_suite(_tiny_suite(tmp_path, cfg, image_folder))
+    experiments.prepare(suite)
+    experiments.run_suite(suite, shard=(0, 2), defer_cpu_benchmarks=True)
+    done = sorted(p.parent.relative_to(tmp_path / "runs") for p in (tmp_path / "runs").rglob("train_summary.json"))
+    assert len(done) == 2  # half of the 4 (seed, variant) pairs
+    experiments.run_suite(suite, shard=(1, 2), defer_cpu_benchmarks=True)
+    assert len(list((tmp_path / "runs").rglob("train_summary.json"))) == 4
+    assert not list((tmp_path / "runs").rglob("compress.json")), "compress must wait for finalize"
+    experiments.finalize(suite)
+    costs = json.loads((tmp_path / "runs" / "tiny" / "costs.json").read_text())
+    assert set(costs) == {"full", "plain"}
+    assert len(list((tmp_path / "runs" / "tiny" / "full").rglob("compress.json"))) == 2
+    summary = json.loads((tmp_path / "results" / "tiny_summary.json").read_text())
+    assert all("cpu_latency_ms_mean" in s for s in summary)

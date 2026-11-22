@@ -144,18 +144,31 @@ train/val curves, test metrics, per-class F1, confusion matrix, the noise robust
 metrics and the best checkpoint as an artifact. Runs of a suite share a W&B group, and each run is
 tagged with the suite and variant, which makes it easy to build the report tables and figures.
 
-### Kaggle
+### Kaggle and Colab
 
-In a notebook with GPU and Internet on, the dataset attached, and a secret `WANDB_API_KEY`:
+`scripts/cloud_run.py` (called by `kaggle_run.py` / `colab_run.py`) finds or downloads the data,
+reads secrets, builds the split files and a uint8 image cache once, runs the suite on every
+visible GPU in parallel (one worker per GPU, disjoint shards), then measures CPU latency and INT8
+alone and writes `results/<suite>.md`. Re-running continues where it stopped.
+
+**Kaggle** (GPU T4 x2 + Internet on, dataset attached, secret `WANDB_API_KEY`):
 
 ```bash
 !git clone -q https://github.com/vinhhuy15/Radar-Signal-Classification-DL /kaggle/working/repo
-!cd /kaggle/working/repo && pip install -q -e ".[onnx]" && python scripts/kaggle_run.py smoke
+!cd /kaggle/working/repo && pip install -q -e ".[onnx]" && python scripts/kaggle_run.py ablation
 ```
 
-Replace `smoke` with `ablation` or `baselines`; extra arguments go to `radar_cls.experiments run`.
-The script finds the dataset under `/kaggle/input` and writes the split files to
-`/kaggle/working/splits`; commit those to `splits/` in the repo.
+**Colab** (secrets `WANDB_API_KEY`, `KAGGLE_USERNAME`, `KAGGLE_KEY`; mounting Drive keeps runs
+across runtime resets):
+
+```python
+from google.colab import drive; drive.mount("/content/drive")
+!git clone -q https://github.com/vinhhuy15/Radar-Signal-Classification-DL /content/repo
+!cd /content/repo && pip install -q -e ".[onnx]" && python scripts/colab_run.py baselines
+```
+
+Extra arguments go to `radar_cls.experiments run`, e.g. `--seeds 0 1 --set train.epochs=40`.
+Commit the generated `splits/*.csv` so every platform uses the same test images.
 
 ## Project structure
 
@@ -177,7 +190,7 @@ The script finds the dataset under `/kaggle/input` and writes the split files to
 │   ├── tracking.py           # optional Weights & Biases logging
 │   ├── experiments.py        # suite runner (variants x seeds) and result aggregation
 │   └── predict.py            # inference CLI
-├── scripts/kaggle_run.py     # Kaggle notebook entry point
+├── scripts/                  # cloud_run.py (+ kaggle_run.py, colab_run.py wrappers)
 ├── tests/                    # pytest: model, data protocol, end-to-end smoke test
 ├── legacy/Main.py            # original course script, kept unchanged for reference
 └── docs/Report.pdf           # course technical report

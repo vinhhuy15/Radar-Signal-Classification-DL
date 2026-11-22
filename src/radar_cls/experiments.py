@@ -73,7 +73,14 @@ def run_suite(
     only: list[str] | None = None,
     extra: list[str] | None = None,
     wandb: bool | None = None,
+    shard: tuple[int, int] = (0, 1),
+    defer_cpu_benchmarks: bool = False,
 ) -> None:
+    """Run every (seed, variant) pair. ``shard=(i, n)`` runs only pairs with index % n == i,
+    so n processes (e.g. one per GPU) can split a suite without overlapping.
+
+    ``defer_cpu_benchmarks`` skips CPU latency and INT8 here (parallel workers would disturb the
+    timings); run ``finalize`` afterwards, alone, to measure them."""
     from . import compress, train
 
     log = get_logger()
@@ -81,21 +88,65 @@ def run_suite(
     unknown = set(only or []) - set(suite.variants)
     if unknown:
         raise KeyError(f"Unknown variants {sorted(unknown)}; suite has {list(suite.variants)}")
-    for seed in seeds or suite.seeds:
-        for variant in variants:
-            out = run_dir(suite, variant, seed)
-            if (out / "train_summary.json").exists():
-                log.info(f"[skip] {variant} seed {seed}: already done")
-                continue
-            cfg = build_run_config(suite, variant, seed, extra or [], wandb)
-            resume = out / "last.pt"
-            log.info(f"[run] {suite.name}/{variant} seed {seed} -> {out}")
-            train.run(cfg, resume=str(resume) if resume.exists() else None)
-            if variant in suite.compress:
-                try:
-                    compress.run(str(out / "best.pt"))
-                except ImportError as exc:
-                    log.info(f"[compress skipped] {exc}")
+    pairs = [(seed, variant) for seed in (seeds or suite.seeds) for variant in variants]
+    index, count = shard
+    for seed, variant in pairs[index::count]:
+        out = run_dir(suite, variant, seed)
+        if (out / "train_summary.json").exists():
+            log.info(f"[skip] {variant} seed {seed}: already done")
+            continue
+        cfg = build_run_config(suite, variant, seed, extra or [], wandb)
+        if defer_cpu_benchmarks:
+            cfg.eval.measure_cost = False
+        resume = out / "last.pt"
+        log.info(f"[run] {suite.name}/{variant} seed {seed} -> {out}")
+        train.run(cfg, resume=str(resume) if resume.exists() else None)
+        if variant in suite.compress and not defer_cpu_benchmarks:
+            try:
+                compress.run(str(out / "best.pt"))
+            except ImportError as exc:
+                log.info(f"[compress skipped] {exc}")
+    aggregate(suite)
+
+
+def prepare(suite: Suite, extra: list[str] | None = None) -> None:
+    """Create the split files and the image cache once, before parallel workers start."""
+    from .data import SPLITS, build_loaders
+
+    first = next(iter(suite.variants))
+    cfg = build_run_config(suite, first, suite.seeds[0], extra or [], wandb=False)
+    build_loaders(cfg.data, cfg.augment, cfg.train.seed, splits=SPLITS)
+
+
+def finalize(suite: Suite) -> None:
+    """CPU benchmarks run alone: per-variant cost (architecture only, so once per variant) and
+    INT8 compression for the variants listed under ``compress``. Then aggregate."""
+    from . import compress
+    from .checkpoint import load_model
+    from .profiling import cost_report
+
+    log = get_logger()
+    costs = {}
+    for variant in suite.variants:
+        runs = sorted((Path(suite.runs_root) / suite.name / variant).glob("seed*/best.pt"))
+        if not runs:
+            continue
+        model, _ = load_model(runs[0], "cpu")
+        image_size = 224
+        metrics_file = runs[0].parent / "eval_test" / "metrics.json"
+        if metrics_file.exists():
+            image_size = json.loads(metrics_file.read_text()).get("cost", {}).get("image_size", 224)
+        costs[variant] = cost_report(model, image_size=image_size)
+        log.info(f"[cost] {variant}: {costs[variant]}")
+        if variant in suite.compress:
+            for ckpt in runs:
+                if not (ckpt.parent / "compress" / "compress.json").exists():
+                    try:
+                        compress.run(str(ckpt))
+                    except ImportError as exc:
+                        log.info(f"[compress skipped] {exc}")
+    cost_file = Path(suite.runs_root) / suite.name / "costs.json"
+    cost_file.write_text(json.dumps(costs, indent=2), encoding="utf-8")
     aggregate(suite)
 
 
@@ -107,6 +158,8 @@ def _mean_std(values: list[float]) -> tuple[float, float]:
 
 def collect(suite: Suite) -> list[dict[str, Any]]:
     rows = []
+    cost_file = Path(suite.runs_root) / suite.name / "costs.json"
+    suite_costs = json.loads(cost_file.read_text()) if cost_file.exists() else {}
     for variant in suite.variants:
         for seed_dir in sorted((Path(suite.runs_root) / suite.name / variant).glob("seed*")):
             metrics_file = seed_dir / "eval_test" / "metrics.json"
@@ -121,9 +174,10 @@ def collect(suite: Suite) -> list[dict[str, Any]]:
             }
             for r in m.get("noise_robustness", []):
                 row[f"noise_acc_{r['sigma']:g}"] = r["accuracy"]
+            cost = suite_costs.get(variant) or m.get("cost", {})
             for k in ("parameters", "flops", "cpu_latency_ms"):
-                if k in m.get("cost", {}):
-                    row[k] = m["cost"][k]
+                if k in cost:
+                    row[k] = cost[k]
             comp = seed_dir / "compress" / "compress.json"
             if comp.exists():
                 c = json.loads(comp.read_text())
@@ -203,10 +257,17 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--only", nargs="*", help="run only these variants")
     r.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="extra overrides for every run")
     r.add_argument("--wandb", choices=["on", "off"], default=None)
+    r.add_argument("--shard", default="0/1", help="i/n: run only every n-th pair starting at i")
+    r.add_argument("--defer-cpu-benchmarks", action="store_true", help="skip latency/INT8; run finalize later")
+    fz = sub.add_parser("finalize", help="CPU latency per variant + INT8, then aggregate")
+    fz.add_argument("suite")
+    pr = sub.add_parser("prepare", help="build split files and image cache")
+    pr.add_argument("suite")
+    pr.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE")
     a = sub.add_parser("aggregate")
     a.add_argument("suite")
     a.add_argument("--results-dir", default="results")
-    for p in (r, a):
+    for p in (r, a, pr, fz):
         p.add_argument("--base", default=None, help="replace the suite's base config (e.g. configs/kaggle.yaml)")
         p.add_argument("--runs-root", default=None, help="replace the suite's runs_root")
     args = parser.parse_args(argv)
@@ -217,7 +278,12 @@ def main(argv: list[str] | None = None) -> None:
         suite.runs_root = args.runs_root
     if args.cmd == "run":
         wandb = None if args.wandb is None else args.wandb == "on"
-        run_suite(suite, args.seeds, args.only, args.set, wandb)
+        i, n = (int(x) for x in args.shard.split("/"))
+        run_suite(suite, args.seeds, args.only, args.set, wandb, (i, n), args.defer_cpu_benchmarks)
+    elif args.cmd == "finalize":
+        finalize(suite)
+    elif args.cmd == "prepare":
+        prepare(suite, args.set)
     else:
         aggregate(suite, args.results_dir)
 
