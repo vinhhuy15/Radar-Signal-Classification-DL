@@ -20,6 +20,7 @@ class ModelEMA:
         self.decay = decay
         self.warmup = warmup
         self.updates = 0
+        self._pairs = None  # cached (ema, model) tensor lists; state_dict tensors share storage
         for p in self.ema.parameters():
             p.requires_grad_(False)
 
@@ -32,13 +33,20 @@ class ModelEMA:
     def update(self, model: nn.Module) -> None:
         d = self.current_decay()
         self.updates += 1
-        model_state = model.state_dict()
-        for name, ema_v in self.ema.state_dict().items():
-            model_v = model_state[name].detach()
-            if ema_v.dtype.is_floating_point:
-                ema_v.mul_(d).add_(model_v, alpha=1.0 - d)
-            else:
-                ema_v.copy_(model_v)
+        if self._pairs is None:
+            ema_state, model_state = self.ema.state_dict(), model.state_dict()
+            float_pairs = [(ema_state[k], v) for k, v in model_state.items() if v.dtype.is_floating_point]
+            self._pairs = (
+                [e for e, _ in float_pairs],
+                [m for _, m in float_pairs],
+                [(ema_state[k], v) for k, v in model_state.items() if not v.dtype.is_floating_point],
+            )
+        ema_f, model_f, others = self._pairs
+        # One fused kernel per op instead of one per tensor.
+        torch._foreach_mul_(ema_f, d)
+        torch._foreach_add_(ema_f, model_f, alpha=1.0 - d)
+        for e, m in others:
+            e.copy_(m)
 
 
 def mixup_batch(x: torch.Tensor, y: torch.Tensor, alpha: float):
