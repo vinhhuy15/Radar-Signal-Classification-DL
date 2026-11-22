@@ -67,19 +67,24 @@ def find_dataset_root(base: Path) -> Path:
 def colab_download(work: Path) -> Path:
     target = Path("/content/data")
     if not target.exists() or not any(target.iterdir()):
-        # Either a new-style API token (kaggle.com > Settings > API Tokens) or the legacy kaggle.json pair.
-        token = get_secret("colab", "KAGGLE_API_TOKEN")
+        # Either a new-style API token (kaggle.com > Settings > API Tokens, starts with "KGAT_")
+        # or the legacy kaggle.json pair. Accept the token under any of the usual names.
+        names = ("KAGGLE_API_TOKEN", "KAGGLE_TOKEN", "KAGGLE_USERNAME", "KAGGLE_KEY")
+        found = {n: get_secret("colab", n) for n in names}
+        print(f"[cloud_run] Kaggle secrets found: {[n for n, v in found.items() if v] or 'none'}", flush=True)
+        token = found["KAGGLE_API_TOKEN"] or found["KAGGLE_TOKEN"]
+        if not token and found["KAGGLE_KEY"] and found["KAGGLE_KEY"].startswith("KGAT_"):
+            token = found["KAGGLE_KEY"]
         if token:
-            os.environ["KAGGLE_API_TOKEN"] = token
+            os.environ["KAGGLE_API_TOKEN"] = token.strip()
+        elif found["KAGGLE_USERNAME"] and found["KAGGLE_KEY"]:
+            os.environ["KAGGLE_USERNAME"] = found["KAGGLE_USERNAME"].strip()
+            os.environ["KAGGLE_KEY"] = found["KAGGLE_KEY"].strip()
         else:
-            for name in ("KAGGLE_USERNAME", "KAGGLE_KEY"):
-                value = get_secret("colab", name)
-                if not value:
-                    raise RuntimeError(
-                        f"Add KAGGLE_API_TOKEN (or {name}) to Colab Secrets (key icon on the left) "
-                        "to download the dataset."
-                    )
-                os.environ[name] = value
+            raise RuntimeError(
+                "Add KAGGLE_API_TOKEN (or KAGGLE_USERNAME + KAGGLE_KEY) to Colab Secrets "
+                "(key icon on the left, with notebook access on) to download the dataset."
+            )
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "kaggle"], check=True)
         target.mkdir(parents=True, exist_ok=True)
         print(f"[cloud_run] downloading {DATASET} to {target} ...", flush=True)
