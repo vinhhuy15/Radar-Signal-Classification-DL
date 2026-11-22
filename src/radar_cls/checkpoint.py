@@ -32,6 +32,8 @@ def load_model(path: str | Path, device: str | torch.device = "cpu") -> tuple[nn
     """Rebuild the model described by a checkpoint and load its weights."""
     ckpt = load_checkpoint(path, device)
     cfg = config_from_dict(ckpt["config"])
-    model = build_model(cfg.model.name, num_classes=len(ckpt["class_names"]), dropout=cfg.model.dropout)
+    model = build_model(
+        cfg.model.name, num_classes=len(ckpt["class_names"]), dropout=cfg.model.dropout, **cfg.model.kwargs
+    )
     model.load_state_dict(ckpt["state_dict"])
     return model.to(device).eval(), ckpt

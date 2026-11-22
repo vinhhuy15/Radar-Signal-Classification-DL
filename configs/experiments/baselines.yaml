@@ -1,0 +1,15 @@
+# RQ2: comparison with standard lightweight networks at a similar parameter count,
+# all trained from scratch with the same recipe as the full model.
+name: baselines
+base: configs/default.yaml
+seeds: [0, 1, 2]
+common: []
+variants:
+  rf_spectronet: []
+  mobilenetv3_small_w0.2:
+    - model.name=mobilenetv3_small
+  shufflenetv2_tiny:
+    - model.name=shufflenetv2
+  resnet_tiny:
+    - model.name=resnet_tiny
+compress: [rf_spectronet, mobilenetv3_small_w0.2]

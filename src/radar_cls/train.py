@@ -24,7 +24,9 @@ from .checkpoint import load_checkpoint, save_checkpoint
 from .config import Config, load_config, save_config
 from .data import build_loaders
 from .engine import ModelEMA, evaluate, train_one_epoch
+from .evaluate import run as evaluate_checkpoint
 from .models import build_model
+from .tracking import start_tracking
 from .utils import count_parameters, get_logger, resolve_device, set_seed
 
 
@@ -56,10 +58,13 @@ def run(cfg: Config, resume: str | None = None) -> dict:
         f"val={len(bundle.loaders['val'].dataset)}"
     )
 
-    model = build_model(cfg.model.name, num_classes=len(classes), dropout=cfg.model.dropout).to(device)
+    model = build_model(cfg.model.name, num_classes=len(classes), dropout=cfg.model.dropout, **cfg.model.kwargs).to(
+        device
+    )
     n_params = count_parameters(model)
-    log.info(f"Model: {cfg.model.name} | parameters: {n_params:,} (budget {cfg.model.max_params:,})")
-    if n_params > cfg.model.max_params:
+    budget = cfg.model.max_params
+    log.info(f"Model: {cfg.model.name} {cfg.model.kwargs or ''} | parameters: {n_params:,} (budget {budget})")
+    if budget is not None and n_params > budget:
         raise ValueError(f"Model has {n_params:,} parameters, over the {cfg.model.max_params:,} budget")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=cfg.train.label_smoothing)
@@ -85,6 +90,8 @@ def run(cfg: Config, resume: str | None = None) -> dict:
         log.info(f"Resumed from {resume} at epoch {start_epoch + 1}")
 
     writer = _tensorboard_writer(cfg.train.tensorboard, out / "tb")
+    tracker = start_tracking(cfg, out)
+    tracker.summary({"parameters": n_params})
     metric = cfg.train.select_metric
     config_dict = cfg.to_dict()
 
@@ -124,6 +131,7 @@ def run(cfg: Config, resume: str | None = None) -> dict:
             for k, v in row.items():
                 if k != "epoch":
                     writer.add_scalar(k, v, epoch + 1)
+        tracker.log({k.replace("_", "/", 1) if k.startswith(("train_", "val_")) else k: v for k, v in row.items()})
 
         if val[metric] > best_score:
             best_score, best_epoch = val[metric], epoch + 1
@@ -157,8 +165,19 @@ def run(cfg: Config, resume: str | None = None) -> dict:
         writer.close()
     summary = {"best_epoch": best_epoch, f"best_val_{metric}": best_score, "parameters": n_params}
     (out / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
-    (out / "train_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     log.info(f"Done. Best val {metric} {best_score:.4f} at epoch {best_epoch}. Checkpoint: {out / 'best.pt'}")
+    tracker.summary({"best_epoch": best_epoch, f"best_val/{metric}": best_score})
+
+    if cfg.train.eval_test_at_end:
+        # Selection is already final; this is the single look at the test split.
+        test = evaluate_checkpoint(str(out / "best.pt"), split="test", device=str(device), tracker=tracker)
+        summary.update({"test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"]})
+        if "cost" in test:
+            summary["cost"] = test["cost"]
+    if cfg.wandb.log_model:
+        tracker.log_artifact(out / "best.pt", name=f"model-{tracker.run.id}" if tracker.active else "model")
+    (out / "train_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    tracker.finish()
     return summary
 
 

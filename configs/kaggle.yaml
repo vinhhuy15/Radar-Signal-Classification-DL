@@ -1,7 +1,13 @@
-# Same as default.yaml, with Kaggle paths. Usage:
+# Kaggle paths and W&B on. Used as --base for experiment suites, or directly:
 #   python -m radar_cls.train --config configs/kaggle.yaml
+# The data path is filled in by scripts/kaggle_run.py, which finds the dataset under /kaggle/input.
 output_dir: /kaggle/working/runs/default
 
 data:
   root: /kaggle/input/datasets/huynhthethien/radarcommunsignaldata2026train
   split_dir: splits      # commit the generated CSVs so every run uses the same split
+  num_workers: 4
+
+wandb:
+  enabled: true
+  project: radar-signal-classification

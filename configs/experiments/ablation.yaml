@@ -1,0 +1,35 @@
+# RQ1: which components earn their parameters? Each step adds one thing to the previous one.
+# Same split, same budget (< 100k params), several seeds; mean ± std on the test split.
+name: ablation
+base: configs/default.yaml
+seeds: [0, 1, 2]
+common: []
+variants:
+  A0_plain_cnn:          # plain 3x3 conv stack, average pooling, no training tricks
+    - model.name=plain_cnn
+    - augment.mixup_alpha=0
+    - train.label_smoothing=0
+    - train.ema_decay=0
+  A1_mbconv:             # + MBConv blocks (no attention)
+    - "model.kwargs={attention: none, pooling: avg}"
+    - augment.mixup_alpha=0
+    - train.label_smoothing=0
+    - train.ema_decay=0
+  A2_coordatt:           # + Coordinate Attention
+    - "model.kwargs={attention: coord, pooling: avg}"
+    - augment.mixup_alpha=0
+    - train.label_smoothing=0
+    - train.ema_decay=0
+  A3_hybrid_pool:        # + hybrid avg+max pooling (= course architecture)
+    - augment.mixup_alpha=0
+    - train.label_smoothing=0
+    - train.ema_decay=0
+  A4_mixup_ls:           # + MixUp and label smoothing
+    - train.ema_decay=0
+  A5_full:               # + EMA (= full model)
+    []
+  X_se_attention:        # side study: SE instead of Coordinate Attention
+    - "model.kwargs={attention: se}"
+  X_hflip:               # side study: does horizontal flip hurt?
+    - augment.hflip=true
+compress: [A5_full]

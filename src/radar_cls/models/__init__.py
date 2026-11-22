@@ -6,10 +6,15 @@ from collections.abc import Callable
 
 import torch.nn as nn
 
+from .baselines import PlainCNN, ResNetTiny, mobilenetv3_small, shufflenetv2
 from .rf_spectronet import BasicCNN, CoordAtt, MBConvCA, RFSpectroNet
 
 _REGISTRY: dict[str, Callable[..., nn.Module]] = {
     "rf_spectronet": RFSpectroNet,
+    "plain_cnn": PlainCNN,
+    "mobilenetv3_small": mobilenetv3_small,
+    "shufflenetv2": shufflenetv2,
+    "resnet_tiny": ResNetTiny,
 }
 
 
@@ -33,4 +38,14 @@ def build_model(name: str, num_classes: int, **kwargs) -> nn.Module:
     return _REGISTRY[name](num_classes=num_classes, **kwargs)
 
 
-__all__ = ["BasicCNN", "CoordAtt", "MBConvCA", "RFSpectroNet", "available_models", "build_model", "register_model"]
+__all__ = [
+    "BasicCNN",
+    "CoordAtt",
+    "MBConvCA",
+    "PlainCNN",
+    "RFSpectroNet",
+    "ResNetTiny",
+    "available_models",
+    "build_model",
+    "register_model",
+]

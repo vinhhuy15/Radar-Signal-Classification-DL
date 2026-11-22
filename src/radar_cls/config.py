@@ -40,7 +40,9 @@ class AugmentConfig:
 class ModelConfig:
     name: str = "rf_spectronet"
     dropout: float = 0.3
-    max_params: int = 100_000
+    max_params: int | None = 100_000  # None disables the budget check
+    # Extra constructor arguments, e.g. {"attention": "none", "pooling": "avg"} for ablations.
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -58,6 +60,29 @@ class TrainConfig:
     device: str = "auto"
     tensorboard: bool = True  # used only if tensorboard is installed
     save_every: int = 1  # write last.pt every N epochs
+    # After training, evaluate best.pt on the test split (selection never looks at test).
+    eval_test_at_end: bool = True
+
+
+@dataclass
+class EvalConfig:
+    # Std of Gaussian noise added in normalized pixel space for the robustness curve.
+    # A proxy for channel noise: the dataset has no SNR labels.
+    noise_sigmas: tuple[float, ...] = (0.0, 0.05, 0.1, 0.2, 0.3, 0.5)
+    noise_seed: int = 0
+    measure_cost: bool = True  # params, FLOPs, CPU latency
+
+
+@dataclass
+class WandbConfig:
+    enabled: bool = False
+    project: str = "radar-signal-classification"
+    entity: str | None = None
+    group: str | None = None  # e.g. the experiment suite name
+    name: str | None = None
+    tags: tuple[str, ...] = ()
+    mode: str = "online"  # "online", "offline" or "disabled"
+    log_model: bool = True  # upload best.pt as a W&B artifact
 
 
 @dataclass
@@ -66,6 +91,8 @@ class Config:
     augment: AugmentConfig = field(default_factory=AugmentConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+    eval: EvalConfig = field(default_factory=EvalConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)
     output_dir: str = "runs/default"
 
     def to_dict(self) -> dict[str, Any]:

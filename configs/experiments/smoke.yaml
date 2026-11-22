@@ -1,0 +1,10 @@
+# Quick end-to-end check of the whole pipeline on the real data (a few minutes on a GPU).
+name: smoke
+base: configs/default.yaml
+seeds: [0]
+common:
+  - train.epochs=2
+variants:
+  full: []
+  plain: [model.name=plain_cnn]
+compress: [full]

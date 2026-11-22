@@ -110,21 +110,74 @@ print(meta["class_names"][probs.argmax().item()], probs.max().item())
 Preprocessing is `ToTensor()` followed by `Normalize(mean=0.5, std=0.5)` per channel. It is stored
 in the model's metadata, so you do not need to hard-code it.
 
+## Experiments
+
+Experiment suites live in `configs/experiments/`. Each suite is a list of variants (config
+overrides) run over several seeds; results are aggregated as mean ± std on the test split.
+
+| Suite | Question | Variants |
+|:---|:---|:---|
+| `ablation` | Which components earn their parameters? | A0 plain CNN → A1 +MBConv → A2 +Coordinate Attention → A3 +hybrid pooling → A4 +MixUp/label smoothing → A5 +EMA (full), plus SE-instead-of-CA and horizontal-flip side studies |
+| `baselines` | How does it compare at the same budget? | RF-SpectroNet, MobileNetV3-Small (width 0.2), ShuffleNetV2 (reduced), ResNet-tiny, all < 100k params, trained from scratch |
+| `smoke` | Does the pipeline work on the real data? | 2 epochs, 1 seed |
+
+```bash
+python -m radar_cls.experiments run configs/experiments/ablation.yaml
+python -m radar_cls.experiments run configs/experiments/baselines.yaml --seeds 0 1 --set train.epochs=30
+python -m radar_cls.experiments aggregate configs/experiments/ablation.yaml   # -> results/ablation.md
+```
+
+Finished runs are skipped and interrupted runs resume from `last.pt`, so a suite can be continued
+across sessions. For every run the test evaluation also records:
+
+- **Cost:** parameters, FLOPs, FP32 size and single-thread CPU latency (batch 1, median of 50 runs).
+- **Noise robustness:** accuracy with Gaussian noise of increasing std added to the normalized
+  input. This is a proxy: the dataset has no SNR labels, so a true accuracy-vs-SNR curve needs a
+  generated dataset.
+- **INT8 compression** (variants listed under `compress:`): ONNX Runtime static quantization
+  (QDQ, per-channel, calibrated on val), with FP32 vs INT8 accuracy, size and latency.
+
+### Weights & Biases
+
+Set `wandb.enabled: true` (already on in `configs/kaggle.yaml`). Each run logs its config, per-epoch
+train/val curves, test metrics, per-class F1, confusion matrix, the noise robustness table, cost
+metrics and the best checkpoint as an artifact. Runs of a suite share a W&B group, and each run is
+tagged with the suite and variant, which makes it easy to build the report tables and figures.
+
+### Kaggle
+
+In a notebook with GPU and Internet on, the dataset attached, and a secret `WANDB_API_KEY`:
+
+```bash
+!git clone -q https://github.com/vinhhuy15/Radar-Signal-Classification-DL /kaggle/working/repo
+!cd /kaggle/working/repo && pip install -q -e ".[onnx]" && python scripts/kaggle_run.py smoke
+```
+
+Replace `smoke` with `ablation` or `baselines`; extra arguments go to `radar_cls.experiments run`.
+The script finds the dataset under `/kaggle/input` and writes the split files to
+`/kaggle/working/splits`; commit those to `splits/` in the repo.
+
 ## Project structure
 
 ```
 ├── configs/
 │   ├── default.yaml          # full model, clean protocol
-│   └── kaggle.yaml           # Kaggle paths
+│   ├── kaggle.yaml           # Kaggle paths, W&B on
+│   └── experiments/          # ablation, baselines, smoke suites
 ├── src/radar_cls/
 │   ├── config.py             # typed config, YAML loading, --set overrides
 │   ├── data.py               # stratified splits, transforms, loaders
-│   ├── models/               # model registry + RF-SpectroNet
+│   ├── models/               # model registry, RF-SpectroNet and baselines
 │   ├── engine.py             # train/eval loops, EMA, MixUp
 │   ├── train.py              # training CLI (checkpoints, resume, AMP, TensorBoard)
 │   ├── evaluate.py           # metrics, per-class report, confusion matrix
 │   ├── export.py             # TorchScript / ONNX export with metadata
+│   ├── compress.py           # INT8 quantization (ONNX Runtime) and FP32 vs INT8 comparison
+│   ├── profiling.py          # parameters, FLOPs, CPU latency
+│   ├── tracking.py           # optional Weights & Biases logging
+│   ├── experiments.py        # suite runner (variants x seeds) and result aggregation
 │   └── predict.py            # inference CLI
+├── scripts/kaggle_run.py     # Kaggle notebook entry point
 ├── tests/                    # pytest: model, data protocol, end-to-end smoke test
 ├── legacy/Main.py            # original course script, kept unchanged for reference
 └── docs/Report.pdf           # course technical report
@@ -153,7 +206,7 @@ CI runs the same checks on every pull request.
 
 ## Limitations
 
-- The dataset has no SNR labels, so robustness versus SNR is not measured yet.
+- The dataset has no SNR labels, so robustness is measured with added image noise as a proxy, not versus SNR.
 - No measurements on embedded hardware; any latency figures will be from a desktop CPU.
 
 ## Author
