@@ -72,7 +72,7 @@ def run(cfg: Config, resume: str | None = None) -> dict:
     optimizer = AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.epochs, eta_min=cfg.train.min_lr)
     scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
-    ema = ModelEMA(model, cfg.train.ema_decay) if cfg.train.ema_decay > 0 else None
+    ema = ModelEMA(model, cfg.train.ema_decay, warmup=cfg.train.ema_warmup) if cfg.train.ema_decay > 0 else None
 
     start_epoch, best_score, best_epoch = 0, -1.0, -1
     history: list[dict] = []
@@ -84,6 +84,7 @@ def run(cfg: Config, resume: str | None = None) -> dict:
         scaler.load_state_dict(state["scaler"])
         if ema is not None and state.get("ema") is not None:
             ema.ema.load_state_dict(state["ema"])
+            ema.updates = state.get("ema_updates", 0)
         start_epoch = state["epoch"] + 1
         best_score, best_epoch = state["best_score"], state["best_epoch"]
         history = state["history"]
@@ -150,6 +151,7 @@ def run(cfg: Config, resume: str | None = None) -> dict:
                 out / "last.pt",
                 model=model.state_dict(),
                 ema=ema.ema.state_dict() if ema is not None else None,
+                ema_updates=ema.updates if ema is not None else 0,
                 optimizer=optimizer.state_dict(),
                 scheduler=scheduler.state_dict(),
                 scaler=scaler.state_dict(),

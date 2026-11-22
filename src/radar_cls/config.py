@@ -25,6 +25,9 @@ class DataConfig:
     std: tuple[float, float, float] = (0.5, 0.5, 0.5)
     batch_size: int = 32
     num_workers: int = 2
+    # If set, decode every image once into a uint8 memory-mapped array in this folder and train from
+    # it. Removes PNG decoding from the training loop (the main bottleneck on Kaggle's 4 CPUs).
+    cache_dir: str | None = None
 
 
 @dataclass
@@ -53,6 +56,9 @@ class TrainConfig:
     min_lr: float = 1e-6
     label_smoothing: float = 0.1
     ema_decay: float = 0.999  # 0 disables EMA
+    # Ramp the EMA decay up from 0 as (1 + step) / (10 + step), so early, random weights do not
+    # dominate short runs. Off reproduces the course recipe exactly.
+    ema_warmup: bool = True
     amp: bool = True  # mixed precision, only used on CUDA
     select_metric: str = "macro_f1"  # "accuracy" or "macro_f1", measured on val
     seed: int = 42

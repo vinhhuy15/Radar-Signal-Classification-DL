@@ -15,19 +15,28 @@ from torch.utils.data import DataLoader
 class ModelEMA:
     """Exponential moving average of model weights. BatchNorm buffers are tracked too."""
 
-    def __init__(self, model: nn.Module, decay: float = 0.999):
+    def __init__(self, model: nn.Module, decay: float = 0.999, warmup: bool = False):
         self.ema = copy.deepcopy(model).eval()
         self.decay = decay
+        self.warmup = warmup
+        self.updates = 0
         for p in self.ema.parameters():
             p.requires_grad_(False)
 
+    def current_decay(self) -> float:
+        if not self.warmup:
+            return self.decay
+        return min(self.decay, (1 + self.updates) / (10 + self.updates))
+
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
+        d = self.current_decay()
+        self.updates += 1
         model_state = model.state_dict()
         for name, ema_v in self.ema.state_dict().items():
             model_v = model_state[name].detach()
             if ema_v.dtype.is_floating_point:
-                ema_v.mul_(self.decay).add_(model_v, alpha=1.0 - self.decay)
+                ema_v.mul_(d).add_(model_v, alpha=1.0 - d)
             else:
                 ema_v.copy_(model_v)
 

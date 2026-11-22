@@ -85,7 +85,9 @@ def main() -> None:
         *extra,
     ]
     print("[kaggle_run]", " ".join(cmd))
-    subprocess.run(cmd, check=True, cwd=WORK)
+    # Unbuffered so per-epoch logs show up in the notebook as they happen.
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    subprocess.run(cmd, check=True, cwd=WORK, env=env)
     print(f"[kaggle_run] done. Results table: {WORK / 'results' / (suite + '.md')}")
     print(f"[kaggle_run] split files (commit these to the repo): {WORK / 'splits'}")
 

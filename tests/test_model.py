@@ -58,3 +58,17 @@ def test_matches_legacy_model_outputs():
     x = torch.randn(2, 3, 224, 224)
     with torch.no_grad():
         torch.testing.assert_close(new(x), legacy(x))
+
+
+def test_ema_warmup_tracks_early_weights():
+    from radar_cls.engine import ModelEMA
+
+    model = torch.nn.Linear(2, 2)
+    ema = ModelEMA(model, decay=0.999, warmup=True)
+    assert ema.current_decay() == pytest.approx(0.1)
+    with torch.no_grad():
+        model.weight.fill_(1.0)
+    ema.update(model)
+    # With warmup the first update moves the EMA 90% of the way; without it, only 0.1%.
+    assert ema.ema.weight.mean().item() > 0.8
+    assert ModelEMA(model, 0.999, warmup=False).current_decay() == 0.999

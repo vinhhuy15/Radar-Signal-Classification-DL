@@ -7,6 +7,7 @@ data:
   root: /kaggle/input/datasets/huynhthethien/radarcommunsignaldata2026train
   split_dir: splits      # commit the generated CSVs so every run uses the same split
   num_workers: 4
+  cache_dir: /tmp/radar_cache   # decode PNGs once per session (~11 GB), much faster epochs
 
 wandb:
   enabled: true
